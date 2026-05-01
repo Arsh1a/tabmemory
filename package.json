@@ -1,6 +1,6 @@
 {
   "name": "tabmemory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local-first semantic search over your browsing history",
   "type": "module",
   "scripts": {

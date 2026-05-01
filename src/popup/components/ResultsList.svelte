@@ -10,7 +10,7 @@
 
 <div class="overflow-y-auto flex-1">
   {#if !showResults}
-    <div class="px-4 py-2.5 pt-2 text-[10px] font-mono-plex text-dim tracking-widest uppercase border-b border-subtle">
+<div class="px-4 py-2.5 pt-2 text-[10px] font-mono-plex text-dim tracking-widest uppercase border-b border-subtle">
       recently indexed
     </div>
     {#if $recent.length === 0}
