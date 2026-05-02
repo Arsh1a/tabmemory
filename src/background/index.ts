@@ -162,7 +162,7 @@ chrome.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
         await db.savePage(storedPage);
         await db.evictOldest(MAX_PAGES);
         pending.delete(storedPage.url);
-        console.log(`[TabMemory] Indexed: ${storedPage.title}`);
+        updateBadge();
         isEmbedding = false;
         currentPage = null;
         currentPageData = null;
@@ -267,5 +267,13 @@ chrome.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
   return NEEDS_RESPONSE.has(msg.type);
 });
 
+async function updateBadge() {
+  const { totalPages } = await db.getStats();
+  const text = totalPages >= 1000 ? `${Math.floor(totalPages / 1000)}k` : String(totalPages);
+  chrome.action.setBadgeText({ text });
+  chrome.action.setBadgeBackgroundColor({ color: "#7c6aff" });
+}
+
 // Restore queue from previous session on startup
 restoreQueue();
+updateBadge();

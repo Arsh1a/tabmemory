@@ -10,6 +10,14 @@ Versions match `manifest.json` and `package.json`.
 
 ---
 
+## [0.1.2] — 2026-05-02
+
+### Added
+
+- Extension icon badge showing total indexed page count
+
+---
+
 ## [0.1.1] — 2026-05-01
 
 ### Added
