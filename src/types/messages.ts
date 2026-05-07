@@ -22,7 +22,15 @@ export type Msg =
   | { type: "EMBED_DONE"; payload: StoredPage }
   | { type: "EMBED_ERROR"; payload: { url: string; error: string } }
   | { type: "OFFSCREEN_READY" }
-  | { type: "MODEL_PROGRESS"; payload: { progress: number; file: string; loaded: number; total: number } }
+  | {
+      type: "MODEL_PROGRESS";
+      payload: {
+        progress: number;
+        file: string;
+        loaded: number;
+        total: number;
+      };
+    }
   | { type: "MODEL_READY" }
   | { type: "MODEL_ERROR"; payload: { message: string } }
   | { type: "GET_MODEL_STATE" }
@@ -44,4 +52,7 @@ export type Msg =
   | {
       type: "STATS";
       payload: { totalPages: number; oldestPage: number | null };
-    };
+    }
+  | { type: "EXTRACT_PDF"; payload: { url: string; title: string } }
+  | { type: "PDF_EXTRACTED"; payload: PageData }
+  | { type: "PDF_EXTRACT_ERROR"; payload: { url: string; error: string } };

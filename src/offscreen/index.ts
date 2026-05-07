@@ -13,7 +13,13 @@ import {
   env,
   type FeatureExtractionPipeline,
 } from "@huggingface/transformers";
+import * as pdfjs from "pdfjs-dist";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import type { TextItem } from "pdfjs-dist/types/src/display/api";
 import type { Msg, PageData, StoredPage } from "@/types/messages";
+import { prepareText } from "@/lib/textprep";
+
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 if (env.backends.onnx.wasm) {
   env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL("assets/");
@@ -159,6 +165,56 @@ chrome.runtime.onMessage.addListener((msg: Msg) => {
           .catch(() => {});
       } catch (err) {
         console.error("[TabMemory] Query embed failed:", err);
+      }
+    })();
+    return;
+  }
+
+  if (msg.type === "EXTRACT_PDF") {
+    const { url, title } = msg.payload;
+    (async () => {
+      try {
+        const response = await fetch(url);
+        const arrayBuffer = await response.arrayBuffer();
+        const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+
+        let rawText = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const pageText = content.items
+            .filter((item): item is TextItem => "str" in item)
+            .map((item) => item.str)
+            .join(" ");
+          rawText += pageText + "\n";
+        }
+
+        const text = prepareText(rawText.trim());
+        if (text.length < 200) {
+          chrome.runtime.sendMessage({
+            type: "PDF_EXTRACT_ERROR",
+            payload: { url, error: "PDF has too little extractable text" },
+          });
+          return;
+        }
+
+        const excerpt = text.slice(0, 200) + (text.length > 200 ? "…" : "");
+        const pageData: PageData = {
+          url,
+          title,
+          text,
+          excerpt,
+          timestamp: Date.now(),
+        };
+        chrome.runtime.sendMessage({
+          type: "PDF_EXTRACTED",
+          payload: pageData,
+        });
+      } catch (err) {
+        chrome.runtime.sendMessage({
+          type: "PDF_EXTRACT_ERROR",
+          payload: { url, error: String(err) },
+        });
       }
     })();
     return;

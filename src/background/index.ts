@@ -131,11 +131,18 @@ chrome.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
       }
 
       case "PAGE_EXTRACTED": {
-        const { indexingEnabled } = await chrome.storage.local.get("indexingEnabled");
-        if (indexingEnabled === false) break;
         const url = normalizeUrl(msg.payload.url);
         const payload = { ...msg.payload, url };
         if (isExcluded(url) || pending.has(url)) break;
+        pending.add(url);
+
+        const { indexingEnabled } =
+          await chrome.storage.local.get("indexingEnabled");
+        if (indexingEnabled === false) {
+          pending.delete(url);
+          break;
+        }
+
         const userExcluded = await getUserExcludedDomains();
         try {
           const hostname = new URL(url).hostname;
@@ -143,14 +150,21 @@ chrome.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
             userExcluded.some(
               (d) => hostname === d || hostname.endsWith(`.${d}`),
             )
-          )
+          ) {
+            pending.delete(url);
             break;
+          }
         } catch {
+          pending.delete(url);
           break;
         }
+
         const existing = await db.getByUrl(url);
-        if (existing) break;
-        pending.add(url);
+        if (existing) {
+          pending.delete(url);
+          break;
+        }
+
         embedQueue.push(payload);
         await persistQueue();
         processQueue();
@@ -260,6 +274,23 @@ chrome.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
         }
         break;
       }
+
+      case "PDF_EXTRACTED": {
+        const payload = msg.payload;
+        embedQueue.push(payload);
+        await persistQueue();
+        processQueue();
+        break;
+      }
+
+      case "PDF_EXTRACT_ERROR": {
+        pending.delete(msg.payload.url);
+        console.warn(
+          `[TabMemory] PDF extraction failed for ${msg.payload.url}:`,
+          msg.payload.error,
+        );
+        break;
+      }
     }
   })();
 
@@ -269,10 +300,81 @@ chrome.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
 
 async function updateBadge() {
   const { totalPages } = await db.getStats();
-  const text = totalPages >= 1000 ? `${Math.floor(totalPages / 1000)}k` : String(totalPages);
+  const text =
+    totalPages >= 1000
+      ? `${Math.floor(totalPages / 1000)}k`
+      : String(totalPages);
   chrome.action.setBadgeText({ text });
   chrome.action.setBadgeBackgroundColor({ color: "#7c6aff" });
 }
+
+function isPdfUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname.toLowerCase().endsWith(".pdf");
+  } catch {
+    return false;
+  }
+}
+
+// Track tabs that are serving a PDF by content-type (URL may not end in .pdf)
+const pdfTabs = new Set<number>();
+
+chrome.webRequest.onResponseStarted.addListener(
+  (details) => {
+    if (details.type !== "main_frame" || details.tabId < 0) return;
+    const ct =
+      details.responseHeaders?.find(
+        (h) => h.name.toLowerCase() === "content-type",
+      )?.value ?? "";
+    if (ct.includes("application/pdf")) {
+      pdfTabs.add(details.tabId);
+    }
+  },
+  { urls: ["<all_urls>"] },
+  ["responseHeaders"],
+);
+
+async function maybeIndexPdfTab(_tabId: number, tab: chrome.tabs.Tab) {
+  if (!tab.url) return;
+  const url = normalizeUrl(tab.url);
+  if (isExcluded(url) || pending.has(url)) return;
+
+  const { indexingEnabled } = await chrome.storage.local.get("indexingEnabled");
+  if (indexingEnabled === false) return;
+
+  const userExcluded = await getUserExcludedDomains();
+  try {
+    const hostname = new URL(url).hostname;
+    if (userExcluded.some((d) => hostname === d || hostname.endsWith(`.${d}`)))
+      return;
+  } catch {
+    return;
+  }
+
+  const existing = await db.getByUrl(url);
+  if (existing) return;
+
+  pending.add(url);
+  const title = tab.title || new URL(url).pathname.split("/").pop() || url;
+  await ensureOffscreenDocument();
+  chrome.runtime.sendMessage({ type: "EXTRACT_PDF", payload: { url, title } });
+}
+
+// Detect PDF tab navigations — by URL extension OR by content-type (webRequest above)
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete" || !tab.url) return;
+  const url = normalizeUrl(tab.url);
+
+  if (pdfTabs.has(tabId)) {
+    pdfTabs.delete(tabId);
+    await maybeIndexPdfTab(tabId, tab);
+    return;
+  }
+
+  if (isPdfUrl(url)) {
+    await maybeIndexPdfTab(tabId, tab);
+  }
+});
 
 // Restore queue from previous session on startup
 restoreQueue();
